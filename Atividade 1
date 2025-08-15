@@ -1,0 +1,119 @@
+#include <stdio.h>
+
+#include "pico/stdlib.h"
+
+#include "pico/cyw43_arch.h"
+
+#include "hardware/adc.h"
+
+#include "lwip/apps/mqtt.h"
+
+#include "lwip/ip_addr.h"
+
+ 
+
+#define WIFI_SSID "SEU_WIFI"
+
+#define WIFI_PASS "SUA_SENHA"
+
+#define MQTT_BROKER_IP "192.168.1.100"
+
+#define MQTT_TOPIC "pico/temperatura"
+
+#define BUTTON_PIN 14
+
+ 
+
+struct mqtt_client mqtt_client;
+
+ 
+
+float read_temperature() {
+
+    adc_select_input(4);
+
+    uint16_t raw = adc_read();
+
+    return 27.0f - ((raw * 3.3f / 4096.0f - 0.706f) / 0.001721f);
+
+}
+
+ 
+
+void mqtt_publish_temperature() {
+
+    float temp = read_temperature();
+
+    char msg[32];
+
+    snprintf(msg, sizeof(msg), "%.2f", temp);
+
+ 
+
+    struct mqtt_connect_client_info_t ci = {.client_id = "pico"};
+
+    ip_addr_t ip;
+
+    ipaddr_aton(MQTT_BROKER_IP, &ip);
+
+ 
+
+    if (!mqtt_client_is_connected(&mqtt_client)) {
+
+        mqtt_client_connect(&mqtt_client, &ip, MQTT_PORT, NULL, &ci);
+
+    }
+
+ 
+
+    mqtt_publish(&mqtt_client, MQTT_TOPIC, msg, strlen(msg), 0, 0, NULL, NULL);
+
+}
+
+ 
+
+int main() {
+
+    stdio_init_all();
+
+    adc_init();
+
+    adc_set_temp_sensor_enabled(true);
+
+    gpio_init(BUTTON_PIN);
+
+    gpio_set_dir(BUTTON_PIN, GPIO_IN);
+
+    gpio_pull_up(BUTTON_PIN);
+
+ 
+
+    if (cyw43_arch_init()) return -1;
+
+    cyw43_arch_enable_sta_mode();
+
+    if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASS, CYW43_AUTH_WPA2_AES_PSK, 10000)) return -1;
+
+ 
+
+    while (true) {
+
+        if (!gpio_get(BUTTON_PIN)) {
+
+            sleep_ms(50);
+
+            if (!gpio_get(BUTTON_PIN)) {
+
+                mqtt_publish_temperature();
+
+                while (!gpio_get(BUTTON_PIN));
+
+            }
+
+        }
+
+        sleep_ms(10);
+
+    }
+
+}
