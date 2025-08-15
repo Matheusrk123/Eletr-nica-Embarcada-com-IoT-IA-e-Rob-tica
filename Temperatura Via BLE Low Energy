@@ -1,0 +1,50 @@
+#include <Wire.h>
+#include <MPU6050.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+// Criando objeto do acelerômetro
+MPU6050 mpu;
+// Ponteiro para a característica BLE que envia a temperatura
+BLECharacteristic *tempCharacteristic;
+// UUIDs (identificadores) personalizados para o BLE
+#define UUID_SERVICO "12345678-1234-5678-1234-56789abcdef0"
+#define UUID_CARACTERISTICA "abcdef12-3456-7890-abcd-ef1234567890"
+void setup() {
+Serial.begin(115200);
+// Inicializa comunicação com MPU6050 via I2C
+Wire.begin();
+mpu.initialize();
+// Verifica se está conectado corretamente
+if (!mpu.testConnection()) {
+Serial.println("Erro ao conectar com MPU6050");
+while (1); // para tudo se não estiver funcionando
+}
+BLEDevice::init("SensorTemperaturaMPU");
+BLEServer *servidorBLE = BLEDevice::createServer();
+BLEService *servico = servidorBLE->createService(UUID_SERVICO);
+// Criando a característica de temperatura (permite leitura e notificação)
+tempCharacteristic = servico->createCharacteristic(
+UUID_CARACTERISTICA,
+BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+);
+tempCharacteristic->addDescriptor(new BLE2902());
+servico->start();
+BLEAdvertising *anuncio = BLEDevice::getAdvertising();
+anuncio->start();
+Serial.println("BLE iniciado. Aguardando conexões...");
+}
+void loop() {
+// Pega o valor da temperatura do sensor (valor interno do MPU)
+int16_t tempRaw = mpu.getTemperature();
+// Fórmula fornecida no datasheet para converter em °C
+float temperatura = (tempRaw / 340.0) + 36.53;
+char tempStr[10];
+dtostrf(temperatura, 4, 2, tempStr);
+tempCharacteristic->setValue(tempStr);
+tempCharacteristic->notify();
+Serial.print("Temperatura enviada: ");
+Serial.println(tempStr);
+delay(2000);
+}
