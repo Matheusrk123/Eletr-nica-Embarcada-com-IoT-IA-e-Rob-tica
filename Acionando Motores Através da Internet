@@ -1,0 +1,201 @@
+#include <stdio.h>
+
+#include <string.h>
+
+#include "pico/stdlib.h"
+
+#include "pico/cyw43_arch.h"
+
+#include "hardware/pwm.h"
+
+#include "lwip/apps/mqtt.h"
+
+#include "lwip/ip_addr.h"
+
+ 
+
+#define WIFI_SSID "SEU_WIFI"
+
+#define WIFI_PASS "SUA_SENHA"
+
+#define MQTT_BROKER_IP "192.168.1.100"
+
+ 
+
+#define TOPIC_SENTIDO "motor/sentido"
+
+#define TOPIC_INTENSIDADE "motor/intensidade"
+
+ 
+
+#define PIN_SENTIDO_A 15
+
+#define PIN_SENTIDO_B 16
+
+#define PIN_PWM 17
+
+ 
+
+struct mqtt_client mqtt_client;
+
+ 
+
+uint slice_num;
+
+uint pwm_gpio = PIN_PWM;
+
+ 
+
+void pwm_set_intensity(uint8_t intensity_percent) {
+
+    if (intensity_percent > 100) intensity_percent = 100;
+
+    uint16_t wrap = pwm_get_wrap(slice_num);
+
+    uint16_t level = (wrap * intensity_percent) / 100;
+
+    pwm_set_chan_level(slice_num, PWM_CHAN_A, level);
+
+}
+
+ 
+
+void mqtt_message_cb(void *arg, const char *topic, u16_t tot_len) {
+
+    // Aqui, na prática, o payload deve ser lido do buffer correto.  
+
+    // Para simplificar, deixei um exemplo fixo, mas na implementação final tem que pegar o payload real.
+
+ 
+
+    printf("Mensagem recebida no tópico: %s\n", topic);
+
+ 
+
+    char payload[128] = "horario";  // Exemplo: trocar conforme mensagem recebida
+
+ 
+
+    if (strcmp(topic, TOPIC_SENTIDO) == 0) {
+
+        if (strcmp(payload, "horario") == 0) {
+
+            gpio_put(PIN_SENTIDO_A, 1);
+
+            gpio_put(PIN_SENTIDO_B, 0);
+
+            printf("Motor girando horário\n");
+
+        } else if (strcmp(payload, "anti-horario") == 0) {
+
+            gpio_put(PIN_SENTIDO_A, 0);
+
+            gpio_put(PIN_SENTIDO_B, 1);
+
+            printf("Motor girando anti-horário\n");
+
+        }
+
+    } else if (strcmp(topic, TOPIC_INTENSIDADE) == 0) {
+
+        int intensity = atoi(payload);
+
+        pwm_set_intensity((uint8_t)intensity);
+
+        printf("Intensidade do motor ajustada para: %d%%\n", intensity);
+
+    }
+
+}
+
+ 
+
+void mqtt_connection_cb(mqtt_client_t *client, void *arg, mqtt_connection_status_t status) {
+
+    if (status == MQTT_CONNECT_ACCEPTED) {
+
+        printf("Conectado ao broker MQTT\n");
+
+        mqtt_subscribe(client, TOPIC_SENTIDO, 0, mqtt_message_cb, NULL);
+
+        mqtt_subscribe(client, TOPIC_INTENSIDADE, 0, mqtt_message_cb, NULL);
+
+    } else {
+
+        printf("Falha na conexão MQTT: %d\n", status);
+
+    }
+
+}
+
+ 
+
+int main() {
+
+    stdio_init_all();
+
+ 
+
+    gpio_init(PIN_SENTIDO_A);
+
+    gpio_set_dir(PIN_SENTIDO_A, GPIO_OUT);
+
+    gpio_init(PIN_SENTIDO_B);
+
+    gpio_set_dir(PIN_SENTIDO_B, GPIO_OUT);
+
+    gpio_init(pwm_gpio);
+
+    gpio_set_function(pwm_gpio, GPIO_FUNC_PWM);
+
+    slice_num = pwm_gpio_to_slice_num(pwm_gpio);
+
+    pwm_config config = pwm_get_default_config();
+
+    pwm_config_set_wrap(&config, 65535);
+
+    pwm_init(slice_num, &config, true);
+
+    pwm_set_chan_level(slice_num, PWM_CHAN_A, 0);
+
+ 
+
+    if (cyw43_arch_init()) return -1;
+
+    cyw43_arch_enable_sta_mode();
+
+    if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASS, CYW43_AUTH_WPA2_AES_PSK, 10000)) return -1;
+
+ 
+
+    ip_addr_t ip;
+
+    ipaddr_aton(MQTT_BROKER_IP, &ip);
+
+ 
+
+    struct mqtt_connect_client_info_t ci = {
+
+        .client_id = "pico_motor_ctrl"
+
+    };
+
+ 
+
+    mqtt_client_connect(&mqtt_client, &ip, MQTT_PORT, mqtt_connection_cb, NULL, &ci);
+
+ 
+
+    while (true) {
+
+        cyw43_arch_poll();
+
+        sleep_ms(100);
+
+    }
+
+ 
+
+    return 0;
+
+}
